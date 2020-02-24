@@ -7,8 +7,6 @@ class MongolParagraph {
   /// To create a [MongolParagraph] object, use a [MongolParagraphBuilder].
   MongolParagraph._(this._paragraphStyle, this._textStyle, this._text);
 
-  static const _newLineCodeUnit = 10;
-
   ui.ParagraphStyle _paragraphStyle;
   ui.TextStyle _textStyle;
   String _text;
@@ -17,6 +15,8 @@ class MongolParagraph {
   double _height;
   double _minIntrinsicHeight;
   double _maxIntrinsicHeight;
+
+  List<ui.LineMetrics> _metrics;
 
   double get width => _width;
 
@@ -31,7 +31,7 @@ class MongolParagraph {
 
   void _layout(double height) {
     if (height == _height) return;
-    _calculateRuns();
+    _calculateRuns(height);
     _calculateLineBreaks(height);
     _calculateWidth();
     _height = height;
@@ -40,47 +40,46 @@ class MongolParagraph {
 
   List<TextRun> _runs = [];
 
-  void _calculateRuns() {
+  void _calculateRuns(double width) {
     if (_runs.isNotEmpty) return;
 
-    // go through text find break location
-    final breaker = LineBreaker();
-    breaker.text = _text;
-    final int breakCount = breaker.computeBreaks();
-    final breaks = breaker.breaks;
+//    final textSpan = TextSpan(
+//      text: _text
+//    );
+//
+//    final textPainter = TextPainter(
+//      text: textSpan,
+//      textDirection: TextDirection.ltr,
+//    );
+//    textPainter.layout(
+//      minWidth: 0,
+//      maxWidth: width,
+//    );
+//
+//    _metrics = textPainter.computeLineMetrics();
 
-    // build paragraph for each run
-    int start = 0;
-    int end;
-    for (int i = 0; i < breakCount; i++) {
-      end = breaks[i];
-      _addRun(start, end);
-      start = end;
-    }
-    end = _text.length;
-    if (start < end) {
-      _addRun(start, end);
-    }
-  }
-
-  void _addRun(int start, int end) {
-    final endIgnoringNewLineChar = _isNewLineCharAt(end - 1) ? end - 1 : end;
-    assert(
-        !_text.substring(start, endIgnoringNewLineChar).contains('\n'),
-        'Runs must not contain newline characters. This indicates a bug in the '
-        'mongol plugin.');
     final builder = ui.ParagraphBuilder(_paragraphStyle)
       ..pushStyle(_textStyle)
-      ..addText(_text.substring(start, endIgnoringNewLineChar));
+      ..addText(_text);
     final paragraph = builder.build();
-    paragraph.layout(ui.ParagraphConstraints(width: double.infinity));
+    paragraph.layout(ui.ParagraphConstraints(width: width));
 
-    final run = TextRun(start, end, paragraph);
-    _runs.add(run);
-  }
+    _metrics = paragraph.computeLineMetrics();
+    // print(metrics.length);
+    for (ui.LineMetrics m in _metrics) {
+      var startPosition = paragraph.getPositionForOffset(Offset(m.left, m.baseline));
+      var endPosition = paragraph.getPositionForOffset(Offset(m.left + m.width, m.baseline));
+      var lineText = _text.substring(startPosition.offset, endPosition.offset);
+      print('line: ${m.lineNumber} => \'$lineText\'');
 
-  bool _isNewLineCharAt(int index) {
-    return _text.codeUnitAt(index) == _newLineCodeUnit;
+      var lineBuilder = ui.ParagraphBuilder(_paragraphStyle)
+        ..pushStyle(_textStyle)
+        ..addText(lineText);
+      var line = lineBuilder.build();
+      line.layout(ui.ParagraphConstraints(width: double.infinity));
+      var run2 = TextRun(startPosition.offset, endPosition.offset, line);
+      _runs.add(run2);
+    }
   }
 
   List<LineInfo> _lines = [];
@@ -107,15 +106,7 @@ class MongolParagraph {
       final runWidth = run.paragraph.maxIntrinsicWidth;
       final runHeight = run.paragraph.height;
 
-      if (_runEndsWithNewLine(run)) {
-        end = i + 1;
-        lineWidth += runWidth;
-        lineHeight = math.max(lineHeight, run.paragraph.height);
-        _addLine(start, end, lineWidth, lineHeight);
-        lineWidth = 0;
-        lineHeight = 0;
-        start = end;
-      } else if (lineWidth + runWidth > maxLineLength) {
+      if (lineWidth + runWidth > maxLineLength) {
         _addLine(start, end, lineWidth, lineHeight);
         start = end;
         lineWidth = runWidth;
@@ -130,10 +121,6 @@ class MongolParagraph {
     if (start < end) {
       _addLine(start, end, lineWidth, lineHeight);
     }
-  }
-
-  bool _runEndsWithNewLine(TextRun run) {
-    return _isNewLineCharAt(run.end - 1);
   }
 
   void _addLine(int start, int end, double width, double height) {
